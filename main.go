@@ -10,6 +10,19 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+const (
+	Command       = "/ "
+	StartCommmand = Command + "start"
+	StopCommand   = Command + "stop"
+	StatusCommand = Command + "status"
+)
+
+var (
+	TokenIdError   = errors.New("Token ID is invalid")
+	ClientIdError  = errors.New("Client ID is invalid")
+	ChannelIdError = errors.New("Channel ID is invalid")
+)
+
 var (
 	Token     string
 	ClientId  string
@@ -19,17 +32,17 @@ var (
 func initValue() error {
 	Token = os.Getenv("TOKEN")
 	if Token == "" {
-		return errors.New("Token ID is empty")
+		return TokenIdError
 	}
 
 	ClientId = os.Getenv("CLIENT_ID")
 	if ClientId == "" {
-		return errors.New("Client ID is empty")
+		return ClientIdError
 	}
 
 	ChannelId = os.Getenv("CHANNEL_ID")
 	if Token == "" {
-		return errors.New("Channel ID is empty")
+		return ChannelIdError
 	}
 
 	return nil
@@ -69,15 +82,15 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if m.Content == "/mc start" {
+	if m.Content == StartCommmand {
 		s.ChannelMessageSend(m.ChannelID, "Server starting...")
 	}
 
-	if m.Content == "/mc stop" {
+	if m.Content == StopCommand {
 		s.ChannelMessageSend(m.ChannelID, "Server stopping...")
 	}
 
-	if m.Content == "/mc status" {
+	if m.Content == StatusCommand {
 		s.ChannelMessageSend(m.ChannelID, "Server status is ...")
 	}
 }
