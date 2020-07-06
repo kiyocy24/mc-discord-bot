@@ -84,13 +84,16 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if m.Content == StartCommmand {
 		s.ChannelMessageSend(m.ChannelID, "Server starting...")
+		// start function
 	}
 
 	if m.Content == StopCommand {
 		s.ChannelMessageSend(m.ChannelID, "Server stopping...")
+		// stop function
 	}
 
 	if m.Content == StatusCommand {
 		s.ChannelMessageSend(m.ChannelID, "Server status is ...")
+		// status function
 	}
 }
