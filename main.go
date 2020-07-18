@@ -1,63 +1,64 @@
 package main
 
 import (
-	"errors"
+	"bytes"
+	"context"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/pkg/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"cloud.google.com/go/pubsub"
 )
 
 const (
-	Command       = "/ "
+	Command       = "/"
 	StartCommmand = Command + "start"
 	StopCommand   = Command + "stop"
 	StatusCommand = Command + "status"
+
+	DiscordTokenEnv     = "DISCORD_TOKEN"
+	DiscordClientIDEnv  = "DISCORD_CLIENT_ID"
+	DiscordChannelIDEnv = "DISCORD_CHANNEL_ID"
+
+	GCPProjectIDEnv    = "GCP_PROJECT_ID"
+	GCPStartSubIDEnv   = "GCP_START_SUB_ID"
+	GCPStopSubIDEnv    = "GCP_STOP_SUB_ID"
+	GCPRestartSubIDEnv = "GCP_RESTART_SUB_ID"
 )
-
-var (
-	TokenIdError   = errors.New("Token ID is invalid")
-	ClientIdError  = errors.New("Client ID is invalid")
-	ChannelIdError = errors.New("Channel ID is invalid")
-)
-
-var (
-	Token     string
-	ClientId  string
-	ChannelId string
-)
-
-func initValue() error {
-	Token = os.Getenv("TOKEN")
-	if Token == "" {
-		return TokenIdError
-	}
-
-	ClientId = os.Getenv("CLIENT_ID")
-	if ClientId == "" {
-		return ClientIdError
-	}
-
-	ChannelId = os.Getenv("CHANNEL_ID")
-	if Token == "" {
-		return ChannelIdError
-	}
-
-	return nil
-
-}
 
 func main() {
 	fmt.Println("Bot start")
-	err := initValue()
-	if err != nil {
-		fmt.Println("Init value error.", err)
-		return
-	}
 
-	dg, err := discordgo.New("Bot " + Token)
+	// init env
+	token := os.Getenv(DiscordTokenEnv)
+	if token == "" {
+		fmt.Println(envError(DiscordTokenEnv))
+	}
+	fmt.Println("token : ", token)
+
+	client := os.Getenv(DiscordClientIDEnv)
+	if client == "" {
+		fmt.Println(envError(DiscordClientIDEnv))
+	}
+	fmt.Println("client : ", client)
+
+	channelID := os.Getenv(DiscordChannelIDEnv)
+	if channelID == "" {
+		fmt.Println(envError(DiscordChannelIDEnv))
+	}
+	fmt.Println("channel id : ", channelID)
+
+	// new discord token
+	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		fmt.Println("Login error.", err)
 		return
@@ -85,6 +86,18 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Content == StartCommmand {
 		s.ChannelMessageSend(m.ChannelID, "Server starting...")
 		// start function
+		subID := os.Getenv(GCPStartSubIDEnv)
+		if subID == "" {
+			fmt.Println(envError(GCPStartSubIDEnv))
+			return
+		}
+		err := pullMsgsSync(bytes.NewBufferString("Start instance"), subID)
+		if err != nil {
+			s.ChannelMessageEdit(m.ChannelID, m.ID, "Failed: Server did not started up")
+			log.Fatalf("pullMesgsSync error : %v", err)
+		}
+		s.ChannelMessageEdit(m.ChannelID, m.ID, "Success! Server started up.")
+		fmt.Printf("Server started up")
 	}
 
 	if m.Content == StopCommand {
@@ -96,4 +109,48 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		s.ChannelMessageSend(m.ChannelID, "Server status is ...")
 		// status function
 	}
+}
+
+func pullMsgsSync(w io.Writer, subID string) error {
+	projectID := os.Getenv(GCPProjectIDEnv)
+	if projectID == "" {
+		fmt.Println(envError(GCPProjectIDEnv))
+	}
+
+	ctx := context.Background()
+	client, err := pubsub.NewClient(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("%v", err)
+	}
+	defer client.Close()
+
+	sub := client.Subscription(subID)
+
+	sub.ReceiveSettings.Synchronous = true
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cm := make(chan *pubsub.Message)
+	defer close(cm)
+
+	go func() {
+		for msg := range cm {
+			fmt.Fprintf(w, "Got message :%q\n", string(msg.Data))
+			msg.Ack()
+		}
+	}()
+
+	err = sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
+		cm <- msg
+	})
+	if err != nil && status.Code(err) != codes.Canceled {
+		return fmt.Errorf("Receive: %v", err)
+	}
+
+	return nil
+}
+
+func envError(s string) error {
+	return errors.New("Error: %s env is not set")
 }
