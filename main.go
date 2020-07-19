@@ -132,6 +132,13 @@ func pullMsgsSync(w io.Writer, subID string) error {
 	defer client.Close()
 
 	sub := client.Subscription(subID)
+	exists, err := sub.Exists(ctx)
+	if err != nil {
+		return fmt.Errorf("%v", err)
+	}
+	if !exists {
+		return fmt.Errorf("subscription is not exist. sub id: %v", subID)
+	}
 
 	sub.ReceiveSettings.Synchronous = true
 
