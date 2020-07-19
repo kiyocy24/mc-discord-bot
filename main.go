@@ -5,18 +5,16 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"cloud.google.com/go/pubsub"
 	"github.com/bwmarrin/discordgo"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"cloud.google.com/go/pubsub"
 )
 
 const (
@@ -84,20 +82,27 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if m.Content == StartCommmand {
-		s.ChannelMessageSend(m.ChannelID, "Server starting...")
+		sendMessage, err := s.ChannelMessageSend(m.ChannelID, "Server starting...")
+		if err != nil {
+			fmt.Printf("discord error : %v", err)
+		}
+
 		// start function
 		subID := os.Getenv(GCPStartSubIDEnv)
 		if subID == "" {
 			fmt.Println(envError(GCPStartSubIDEnv))
 			return
 		}
-		err := pullMsgsSync(bytes.NewBufferString("Start instance"), subID)
+
+		err = pullMsgsSync(bytes.NewBufferString("Start instance"), subID)
 		if err != nil {
-			s.ChannelMessageEdit(m.ChannelID, m.ID, "Failed: Server did not started up")
-			log.Fatalf("pullMesgsSync error : %v", err)
+			s.ChannelMessageEdit(m.ChannelID, sendMessage.ID, "Failed: Server did not started up.")
+			fmt.Printf("pullMesgsSync error : %v\n", err)
+			return
 		}
-		s.ChannelMessageEdit(m.ChannelID, m.ID, "Success! Server started up.")
-		fmt.Printf("Server started up")
+
+		s.ChannelMessageSend(m.ChannelID, "Success! Server started up.")
+		fmt.Printf("Server started up.")
 	}
 
 	if m.Content == StopCommand {
