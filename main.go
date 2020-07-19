@@ -13,24 +13,26 @@ import (
 	"cloud.google.com/go/pubsub"
 	"github.com/bwmarrin/discordgo"
 	"github.com/pkg/errors"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 const (
-	Command       = "/"
-	StartCommmand = Command + "start"
-	StopCommand   = Command + "stop"
-	StatusCommand = Command + "status"
-
 	DiscordTokenEnv     = "DISCORD_TOKEN"
 	DiscordClientIDEnv  = "DISCORD_CLIENT_ID"
 	DiscordChannelIDEnv = "DISCORD_CHANNEL_ID"
 
+	GCPAPIkeyEnv       = "GOOGLE_APPLICATION_CREDENTIALS"
 	GCPProjectIDEnv    = "GCP_PROJECT_ID"
 	GCPStartSubIDEnv   = "GCP_START_SUB_ID"
 	GCPStopSubIDEnv    = "GCP_STOP_SUB_ID"
 	GCPRestartSubIDEnv = "GCP_RESTART_SUB_ID"
+
+	Command       = "/"
+	StartCommmand = Command + "start"
+	StopCommand   = Command + "stop"
+	StatusCommand = Command + "status"
 )
 
 func main() {
@@ -123,7 +125,7 @@ func pullMsgsSync(w io.Writer, subID string) error {
 	}
 
 	ctx := context.Background()
-	client, err := pubsub.NewClient(ctx, projectID)
+	client, err := pubsub.NewClient(ctx, projectID, option.WithAPIKey(GCPAPIkeyEnv))
 	if err != nil {
 		return fmt.Errorf("%v", err)
 	}
