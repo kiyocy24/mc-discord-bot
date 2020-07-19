@@ -157,5 +157,5 @@ func pullMsgsSync(w io.Writer, subID string) error {
 }
 
 func envError(s string) error {
-	return errors.New("Error: %s env is not set")
+	return errors.New("Error: " + s + " env is not set")
 }
