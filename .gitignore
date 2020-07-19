@@ -16,3 +16,5 @@
 
 *.bat
 *.env
+
+secret.json
