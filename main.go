@@ -13,7 +13,6 @@ import (
 	"cloud.google.com/go/pubsub"
 	"github.com/bwmarrin/discordgo"
 	"github.com/pkg/errors"
-	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -125,7 +124,7 @@ func pullMsgsSync(w io.Writer, subID string) error {
 	}
 
 	ctx := context.Background()
-	client, err := pubsub.NewClient(ctx, projectID, option.WithAPIKey(GCPAPIkeyEnv))
+	client, err := pubsub.NewClient(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("%v", err)
 	}
@@ -134,6 +133,7 @@ func pullMsgsSync(w io.Writer, subID string) error {
 	sub := client.Subscription(subID)
 	exists, err := sub.Exists(ctx)
 	if err != nil {
+		fmt.Println("test")
 		return fmt.Errorf("%v", err)
 	}
 	if !exists {
