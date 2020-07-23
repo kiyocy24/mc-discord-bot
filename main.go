@@ -134,7 +134,6 @@ func pullMsgsSync(w io.Writer, subID string) error {
 
 	exists, err := sub.Exists(ctx)
 	if err != nil {
-		fmt.Println("test")
 		return fmt.Errorf("%v", err)
 	}
 	if !exists {
