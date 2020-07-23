@@ -1,20 +1,14 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"fmt"
-	"io"
+	"discord-bot/gcp"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"cloud.google.com/go/pubsub"
 	"github.com/bwmarrin/discordgo"
-	"github.com/pkg/errors"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -22,44 +16,44 @@ const (
 	DiscordClientIDEnv  = "DISCORD_CLIENT_ID"
 	DiscordChannelIDEnv = "DISCORD_CHANNEL_ID"
 
-	GCPAPIkeyEnv       = "GOOGLE_APPLICATION_CREDENTIALS"
 	GCPProjectIDEnv    = "GCP_PROJECT_ID"
-	GCPStartSubIDEnv   = "GCP_START_SUB_ID"
-	GCPStopSubIDEnv    = "GCP_STOP_SUB_ID"
-	GCPRestartSubIDEnv = "GCP_RESTART_SUB_ID"
+	GCPStartTopicIDEnv = "GCP_START_TOPIC_ID"
+	GCPStopTopicIDEnv  = "GCP_STOP_TOPIC_ID"
 
 	Command       = "/"
-	StartCommmand = Command + "start"
+	StartCommand  = Command + "start"
 	StopCommand   = Command + "stop"
 	StatusCommand = Command + "status"
 )
 
+var logInfo *log.Logger
+var logError *log.Logger
+var logFatal *log.Logger
+
+func init() {
+	logInfo = log.New(os.Stdout, "[INFO]", log.LstdFlags)
+	logError = log.New(os.Stdout, "[ERROR]", log.LstdFlags)
+	logFatal = log.New(os.Stdout, "[FATAL]", log.LstdFlags)
+}
+
 func main() {
-	fmt.Println("Bot start")
+	logInfo.Println("Bot start.")
+	defer logInfo.Println("Bot finish.")
 
 	// init env
 	token := os.Getenv(DiscordTokenEnv)
-	if token == "" {
-		fmt.Println(envError(DiscordTokenEnv))
-	}
-	fmt.Println("token : ", token)
+	logInfo.Println("token : ", token)
 
 	client := os.Getenv(DiscordClientIDEnv)
-	if client == "" {
-		fmt.Println(envError(DiscordClientIDEnv))
-	}
-	fmt.Println("client : ", client)
+	logInfo.Println("client : ", client)
 
 	channelID := os.Getenv(DiscordChannelIDEnv)
-	if channelID == "" {
-		fmt.Println(envError(DiscordChannelIDEnv))
-	}
-	fmt.Println("channel id : ", channelID)
+	logInfo.Println("channel id : ", channelID)
 
 	// new discord token
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
-		fmt.Println("Login error.", err)
+		logError.Println("Login error.", err)
 		return
 	}
 
@@ -67,11 +61,13 @@ func main() {
 	err = dg.Open()
 
 	if err != nil {
-		fmt.Println("error opening connection,", err)
+		logError.Println("error opening connection,", err)
+		return
 	}
 	defer dg.Close()
 
-	fmt.Println("bot is now running. Press CTRL-C to exit.")
+	logInfo.Println("bot is now running. Press CTRL-C to exit.")
+	logInfo.Println("-------------------------------------------")
 	sc := make(chan os.Signal)
 	signal.Notify(sc, os.Interrupt, syscall.SIGINT, syscall.SIGTERM, os.Kill)
 	<-sc
@@ -81,90 +77,54 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
+	if m.Content == StartCommand || m.Content == StopCommand {
+		logInfo.Printf("id: %v, name: %v, command: %v", m.Author.ID, m.Author.Username, m.Content)
+	}
 
-	if m.Content == StartCommmand {
+	projectID := os.Getenv(GCPProjectIDEnv)
+
+	switch m.Content {
+	case StartCommand:
 		sendMessage, err := s.ChannelMessageSend(m.ChannelID, "Server starting...")
 		if err != nil {
-			fmt.Printf("discord error : %v", err)
+			logError.Printf("discord error : %v", err)
 		}
+		topicID := os.Getenv(GCPStartTopicIDEnv)
 
-		// start function
-		subID := os.Getenv(GCPStartSubIDEnv)
-		if subID == "" {
-			fmt.Println(envError(GCPStartSubIDEnv))
-			return
-		}
+		serverID, err := gcp.Publish(projectID, topicID, "start")
+		logInfo.Printf("Published a message; msg ID: %v\n", serverID)
 
-		err = pullMsgsSync(bytes.NewBufferString("Start instance"), subID)
 		if err != nil {
-			s.ChannelMessageEdit(m.ChannelID, sendMessage.ID, "Failed: Server did not started up.")
-			fmt.Printf("pullMesgsSync error : %v\n", err)
+			s.ChannelMessage(m.ChannelID, "Failed: Server did not started up.\n"+err.Error())
+			logError.Printf("pubsub publish error : %v\n", err)
 			return
 		}
 
-		s.ChannelMessageSend(m.ChannelID, "Success! Server started up.")
-		fmt.Printf("Server started up.")
-	}
+		time.Sleep(time.Second * 10)
+		s.ChannelMessageEdit(m.ChannelID, sendMessage.ID, "Success! Server started up.")
+		logInfo.Printf("Server started up.")
+		break
 
-	if m.Content == StopCommand {
-		s.ChannelMessageSend(m.ChannelID, "Server stopping...")
-		// stop function
-	}
-
-	if m.Content == StatusCommand {
-		s.ChannelMessageSend(m.ChannelID, "Server status is ...")
-		// status function
-	}
-}
-
-func pullMsgsSync(w io.Writer, subID string) error {
-	projectID := os.Getenv(GCPProjectIDEnv)
-	if projectID == "" {
-		fmt.Println(envError(GCPProjectIDEnv))
-	}
-
-	ctx := context.Background()
-	client, err := pubsub.NewClient(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("%v", err)
-	}
-	defer client.Close()
-
-	sub := client.Subscription(subID)
-
-	exists, err := sub.Exists(ctx)
-	if err != nil {
-		return fmt.Errorf("%v", err)
-	}
-	if !exists {
-		return fmt.Errorf("subscription is not exist. sub id: %v", subID)
-	}
-
-	sub.ReceiveSettings.Synchronous = true
-
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	cm := make(chan *pubsub.Message)
-	defer close(cm)
-
-	go func() {
-		for msg := range cm {
-			fmt.Fprintf(w, "Got message :%q\n", string(msg.Data))
-			msg.Ack()
+	case StopCommand:
+		sendMessage, err := s.ChannelMessageSend(m.ChannelID, "Server stopping...")
+		if err != nil {
+			logError.Printf("discord error : %v", err)
 		}
-	}()
+		topicID := os.Getenv(GCPStopTopicIDEnv)
 
-	err = sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
-		cm <- msg
-	})
-	if err != nil && status.Code(err) != codes.Canceled {
-		return fmt.Errorf("Receive: %v", err)
+		serverID, err := gcp.Publish(projectID, topicID, "start")
+		logInfo.Printf("Published a message; msg ID: %v\n", serverID)
+
+		if err != nil {
+			s.ChannelMessage(m.ChannelID, "Failed: Server did not stop.\n"+err.Error())
+			logError.Printf("pubsub publish error : %v\n", err)
+			return
+		}
+
+		time.Sleep(time.Second * 10)
+		s.ChannelMessageEdit(m.ChannelID, sendMessage.ID, "Success! Server stopped.")
+		logInfo.Printf("Server stopped.")
+		break
+
 	}
-
-	return nil
-}
-
-func envError(s string) error {
-	return errors.New("Error: " + s + " env is not set")
 }
